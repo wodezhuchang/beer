@@ -88,7 +88,7 @@ class MultimodalModel(nn.Module):
             nn.ReLU()
         )
         
-        # 融合层
+        # 融合层（BERT + 数值）
         self.fusion_size = self.bert_hidden_size + 32
         self.fusion_fc = nn.Sequential(
             nn.Linear(self.fusion_size, 256),
@@ -200,10 +200,10 @@ def main():
     bert_model_name = 'bert-base-uncased'
     max_len = 128
     batch_size = 16
-    epochs = 5
-    learning_rate = 1e-4
+    epochs = 10
+    learning_rate = 5e-5
     
-    # 数值特征列表
+    # 数值特征（包含分类ID，统一作为数值处理）
     numeric_cols = ['abv', 'ibu', 'srmId', 'glasswareId', 'availableId']
     
     # 设备配置
@@ -303,8 +303,15 @@ def main():
         numeric_dim=len(numeric_cols)
     ).to(device)
     
-    # 优化器和调度器
-    optimizer = AdamW(model.parameters(), lr=learning_rate)
+    # 分层学习率：BERT部分使用较小学习率，新增层使用较大学习率
+    bert_params = list(model.bert.parameters())
+    other_params = list(model.numeric_fc.parameters()) + list(model.fusion_fc.parameters()) + list(model.classifier.parameters())
+    
+    optimizer = AdamW([
+        {'params': bert_params, 'lr': learning_rate * 0.1},  # BERT微调使用较小学习率
+        {'params': other_params, 'lr': learning_rate}        # 新增层使用正常学习率
+    ], lr=learning_rate)
+    
     total_steps = len(train_loader) * epochs
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, total_steps)
     criterion = nn.CrossEntropyLoss()
